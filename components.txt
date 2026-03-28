@@ -1,0 +1,11 @@
+- microcontroller: Arduino Uno
+- motor: 42BYGH40-A-24DH (NEMA 17)
+- driver: A4988
+- distance sensors:
+    - ultrasonic: HC-SR04
+    - IR: GP2Y0A41SK0F
+- current sensor (hall effect): ACS712
+- light sensor module; includes:
+    - photoresistor
+    - LM393 comparator
+    - 3362 trimmer pot
