@@ -2,133 +2,127 @@
 #include "motor.h"
 #include "sensors.h"
 
-Motor* motor;
-CurrentSensor* currentSensor;
-IRDistanceSensor* irSensor;
-LightSensor* lightSensor;
+// Adjusted by user -------------------------------------------------
+// ------------------------------------------------------------------
 
-unsigned long stopStartTime = 0;
-bool stopDelayActive = false;
-bool reversingUntilFlex = false;
+// Set whether to run continuously or to a specific position
+bool continuousMode = false;
+
+// Set target position for non-continuous mode (in cm, from end)
+float targetPosition = 30.0;
+
+// ------------------------------------------------------------------
+// ------------------------------------------------------------------
+
+// Global variables/objects; accessible in both setup() and loop()
+CurrentSensor* currentSensor = nullptr;
+FlexSensor* flexSensor = nullptr;
+IRDistanceSensor* irSensor = nullptr;
+LightSensor* lightSensor = nullptr;
+Motor* motor = nullptr;
+bool isStopped = false;
+bool positionReached = false;
 
 void setup() {
-   Serial.begin(9600);
+    // Start serial communication for debugging
+    Serial.begin(9600);
 
-   motor = new Motor(MS1, MS2, MS3, STEP, DIR, FULL_STEPS_PER_REV);
-   motor->setStepMode(half);
-   motor->setAcceleration(300);
-   motor->setTargetSpeed(800);
+    // Configure LED and push button pins
+    pinMode(GREEN_LED, OUTPUT);
+    pinMode(RED_LED, OUTPUT);
+    pinMode(PUSH_BUTTON, INPUT);
 
-   currentSensor = new CurrentSensor(CURRENT_READ);
-   irSensor = new IRDistanceSensor(IR_DIST_READ);
-   lightSensor = new LightSensor(LIGHT_READ);
+    // Initialize sensors (pins defined in config.h)
+    currentSensor = new CurrentSensor(CURRENT_READ);
+    flexSensor = new FlexSensor(FLEX_READ);
+    irSensor = new IRDistanceSensor(IR_DIST_READ);
+    lightSensor = new LightSensor(LIGHT_READ);
 
-   pinMode(goLed, OUTPUT);
-   pinMode(stopLed, OUTPUT);
-   pinMode(estopPin, INPUT_PULLUP);
+    // Initialize motor (control pins and parameters defined in config.h)
+    motor = new Motor(MS1, MS2, MS3, STEP, DIR, FULL_STEPS_PER_REV);
+
+    // Start with motor direction set to forward
+    motor->setDirection(forward);
+
+    // Set initial micro-stepping mode and delay between steps
+    // (adjust as needed to configure speed and "smoothness")
+    motor->setStepMode(half);
+    motor->setHalfDelay(1);
 }
 
 void loop() {
-   motor->update();
+    // Push button E-stop
+    if (digitalRead(PUSH_BUTTON)) {
+        isStopped = true;
+    }
 
-   float dist = irSensor->readDistance();
-   int flexValue = analogRead(flex);
-   bool dark = lightSensor->isDark();
-   bool running = motor->isRunning();
+    // Check if motor is E-stopped or if it's dark
+    if (isStopped || !lightSensor->isLight()) {
+        // Red LED on
+        digitalWrite(RED_LED, HIGH);
+        digitalWrite(GREEN_LED, LOW);
+    } else {
+        // Green LED on
+        digitalWrite(GREEN_LED, HIGH);
+        digitalWrite(RED_LED, LOW);
 
-   // -----------------------------
-   // DEBUG OUTPUT
-   // -----------------------------
-   Serial.print("Dist=");
-   Serial.print(dist);
-   Serial.print(" | Flex=");
-   Serial.print(flexValue);
-   Serial.print(" | Dark=");
-   Serial.print(dark);
-   Serial.print(" | Running=");
-   Serial.print(running);
-   Serial.print(" | State=");
-   Serial.print(motor->getState());
-   Serial.print(" | Dir=");
-   Serial.print(motor->getDirection());
-   Serial.print(" | Speed=");
-   Serial.println(motor->getCurrentSpeed());
+        // Check whether to run continuously or to a specific position
+        if (continuousMode) {
+            // Read distance and set motor direction accordingly
+            float distance = irSensor->readDistance();
+            if (distance < 10.0) {
+                motor->setDirection(reverse);
+            } else if (distance > 30.0) {
+                motor->setDirection(forward);
+            }
+            // Run motor
+            motor->rotate();
+            // Print current reading
+            float current = currentSensor->readCurrent();
+            Serial.println(current);
 
-   // -----------------------------
-   // PUSHBUTTON EMERGENCY STOP
-   // -----------------------------
-   if (digitalRead(estopPin) == LOW) {
-      motor->emergencyStop();
-      digitalWrite(stopLed, HIGH);
-      digitalWrite(goLed, LOW);
-      return;
-   }
-
-   // -----------------------------
-   // FLEX EMERGENCY STOP
-   // -----------------------------
-   if (flexValue > 800) {
-      motor->emergencyStop();
-      digitalWrite(stopLed, HIGH);
-      digitalWrite(goLed, LOW);
-      return;
-   }
-
-   // -----------------------------
-   // STOP → WAIT 5 SEC → REVERSE UNTIL FLEX > 20
-   // -----------------------------
-   if (!running && !reversingUntilFlex) {
-      if (!stopDelayActive) {
-         stopDelayActive = true;
-         stopStartTime = millis();
-      }
-
-      digitalWrite(stopLed, HIGH);
-      digitalWrite(goLed, LOW);
-
-      if (millis() - stopStartTime < 5000) return;
-
-      stopDelayActive = false;
-      reversingUntilFlex = true;
-
-      motor->reverse();
-      motor->setTargetSpeed(300);
-   }
-
-   if (reversingUntilFlex) {
-      digitalWrite(stopLed, HIGH);
-      digitalWrite(goLed, LOW);
-
-      if (flexValue > 20) {
-         reversingUntilFlex = false;
-      } else {
-         return;
-      }
-   }
-
-   // -----------------------------
-   // NORMAL LOGIC
-   // -----------------------------
-   if (!reversingUntilFlex) {
-      if (dist < 10) {
-         motor->reverse();
-         motor->setTargetSpeed(400);
-      }
-
-      if (dark)
-         motor->setTargetSpeed(200);
-      else
-         motor->setTargetSpeed(800);
-   }
-
-   // -----------------------------
-   // LED LOGIC
-   // -----------------------------
-   if (!running || dist > 7 || reversingUntilFlex) {
-      digitalWrite(stopLed, HIGH);
-      digitalWrite(goLed, LOW);
-   } else {
-      digitalWrite(stopLed, LOW);
-      digitalWrite(goLed, HIGH);
-   }
+        } else if (!continuousMode && !positionReached) {
+            // Measure starting error
+            float error = irSensor->readDistance() - targetPosition;
+            // Set motor direction based on error sign
+            if (error >= 0) {
+                motor->setDirection(forward);
+            } else {
+                motor->setDirection(reverse);
+            }
+            // Attempt to reach target position
+            int revsToMove = (int)(abs(error) / DIST_PER_REV);
+            for (int i = 0; i < revsToMove; i++) {
+                if (digitalRead(PUSH_BUTTON)) {
+                    isStopped = true;
+                }
+                if (!isStopped) {
+                    motor->rotate();
+                } else {
+                    break;
+                }
+            }
+            // Adjust until within target position threshold
+            while (abs(error) > 0.5) {
+                if (digitalRead(PUSH_BUTTON)) {
+                    isStopped = true;
+                }
+                if (!isStopped) {
+                    // Read distance and calculate error from target position
+                    error = irSensor->readDistance() - targetPosition;
+                    // Set motor direction based on error sign
+                    if (error >= 0) {
+                        motor->setDirection(forward);
+                    } else {
+                        motor->setDirection(reverse);
+                    }
+                    // Run motor one revolution
+                    motor->rotate();
+                } else {
+                    break;
+                }
+            }
+            positionReached = true;
+        }
+    }
 }
