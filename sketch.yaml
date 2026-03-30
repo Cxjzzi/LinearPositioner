@@ -1,2 +1,6 @@
 default_fqbn: arduino:avr:uno
+<<<<<<< HEAD
 default_port: COM11
+=======
+default_port: COM7
+>>>>>>> 047289b8b10cef7cb97df8958c335dbb4a1107df

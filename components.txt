@@ -1,10 +1,10 @@
 - microcontroller: Arduino Uno
 - motor: 42BYGH40-A-24DH (NEMA 17)
 - driver: A4988
+- current sensor (hall effect): ACS712
 - distance sensors:
     - ultrasonic: HC-SR04 -> probably won't use
-    - IR: GP2Y0A21YK0F
-- current sensor (hall effect): ACS712
+    - IR: GP2Y0A41SK0F
 - light sensor module; includes:
     - photoresistor
     - LM393 comparator
