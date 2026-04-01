@@ -16,7 +16,8 @@ private:
 class FlexSensor {
 public:
     FlexSensor(int outputPin);
-    int readValue();
+    float readRaw();
+    float readForce();
 
 private:
     int m_outputPin;

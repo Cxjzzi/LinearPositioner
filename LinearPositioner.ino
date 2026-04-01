@@ -9,7 +9,8 @@
 enum OperatingMode {
    MODE_CONTINUOUS = 1,
    MODE_TARGET = 2,
-   MODE_SEQUENCE = 3
+   MODE_SEQUENCE = 3,
+   MODE_FORCE = 4
 };
 
 OperatingMode currentMode = MODE_TARGET;
@@ -18,20 +19,35 @@ OperatingMode currentMode = MODE_TARGET;
 // User-adjustable variables
 // ------------------------------------------------------------
 float targetPosition = 30.0;
+float targetForce = 2.0;
 
 // ------------------------------------------------------------
-// PID Gains — tune these on hardware
+// Position-control PID Gains
 // ------------------------------------------------------------
 float Kp = 20.0;
 float Ki = 0.00;
 float Kd = 0.03;
 
 // ------------------------------------------------------------
-// PID state variables
+// Force-control PID Gains
+// ------------------------------------------------------------
+float KpForce = 12.0;
+float KiForce = 0.00;
+float KdForce = 0.00;
+
+// ------------------------------------------------------------
+// PID state variables (position)
 // ------------------------------------------------------------
 float pidIntegral = 0.0;
 float pidPrevError = 0.0;
 unsigned long pidLastTime = 0;
+
+// ------------------------------------------------------------
+// PID state variables (force)
+// ------------------------------------------------------------
+float forceIntegral = 0.0;
+float forcePrevError = 0.0;
+unsigned long forceLastTime = 0;
 
 // ------------------------------------------------------------
 // Target mode state
@@ -53,6 +69,12 @@ unsigned long dwellStartTime = 0;
 const unsigned long DWELL_TIME_MS = 1500;   // 1.5 seconds
 
 // ------------------------------------------------------------
+// Force mode state
+// ------------------------------------------------------------
+bool forceActive = false;
+bool contactDetected = false;
+
+// ------------------------------------------------------------
 // Tuning constants
 // ------------------------------------------------------------
 const float POSITION_TOLERANCE_CM = 0.15;
@@ -63,6 +85,15 @@ const float INTEGRAL_LIMIT = 20.0;
 // Optional soft limits for entered targets
 const float MIN_TARGET_CM = 5.0;
 const float MAX_TARGET_CM = 35.0;
+
+// Force control constants
+const float MIN_FORCE_TARGET_N = 0.2;
+const float MAX_FORCE_TARGET_N = 8.0;
+const float FORCE_TOLERANCE_N = 0.10;
+const float CONTACT_FORCE_THRESHOLD_N = 0.20;
+const float FORCE_MIN_OUTPUT = 0.5;
+const float FORCE_MAX_OUTPUT = 35.0;
+const float FORCE_INTEGRAL_LIMIT = 10.0;
 
 // ------------------------------------------------------------
 // Global objects
@@ -79,11 +110,18 @@ unsigned long toleranceStartTime = 0;
 const unsigned long SETTLE_TIME_MS = 200;
 
 // ------------------------------------------------------------
-// Exponential Moving Average Filter
+// Exponential Moving Average Filter (position)
 // ------------------------------------------------------------
 float filteredDistance = 0.0;
 bool filterInitialized = false;
 const float alpha = 0.3;
+
+// ------------------------------------------------------------
+// Exponential Moving Average Filter (force)
+// ------------------------------------------------------------
+float filteredForce = 0.0;
+bool forceFilterInitialized = false;
+const float forceAlpha = 0.2;
 
 // ------------------------------------------------------------
 // Serial input helpers
@@ -109,6 +147,12 @@ void resetPID() {
    pidLastTime = millis();
 }
 
+void resetForcePID() {
+   forceIntegral = 0.0;
+   forcePrevError = 0.0;
+   forceLastTime = millis();
+}
+
 int outputToHalfDelay(float absOutput) {
    absOutput = constrain(absOutput, MIN_OUTPUT, MAX_OUTPUT);
 
@@ -120,12 +164,26 @@ int outputToHalfDelay(float absOutput) {
    return halfDelay;
 }
 
+int forceOutputToHalfDelay(float absOutput) {
+   absOutput = constrain(absOutput, FORCE_MIN_OUTPUT, FORCE_MAX_OUTPUT);
+
+   float halfDelayFloat = 6.0 - ((absOutput - FORCE_MIN_OUTPUT) * (5.0 / (FORCE_MAX_OUTPUT - FORCE_MIN_OUTPUT)));
+   int halfDelay = (int)halfDelayFloat;
+   halfDelay = constrain(halfDelay, 1, 6);
+
+   return halfDelay;
+}
+
 bool targetIsValid(float target) {
    return (target >= MIN_TARGET_CM && target <= MAX_TARGET_CM);
 }
 
+bool forceTargetIsValid(float force) {
+   return (force >= MIN_FORCE_TARGET_N && force <= MAX_FORCE_TARGET_N);
+}
+
 // ------------------------------------------------------------
-// Sensor filtering helper
+// Sensor filtering helpers
 // ------------------------------------------------------------
 float getFilteredDistance() {
    float rawDistance = irSensor->readDistance();
@@ -138,6 +196,19 @@ float getFilteredDistance() {
    }
 
    return filteredDistance;
+}
+
+float getFilteredForce() {
+   float rawForce = flexSensor->readForce();
+
+   if (!forceFilterInitialized) {
+      filteredForce = rawForce;
+      forceFilterInitialized = true;
+   } else {
+      filteredForce = forceAlpha * rawForce + (1.0 - forceAlpha) * filteredForce;
+   }
+
+   return filteredForce;
 }
 
 // ------------------------------------------------------------
@@ -258,6 +329,49 @@ void promptForSequence() {
 }
 
 // ------------------------------------------------------------
+// Force input helper
+// ------------------------------------------------------------
+void promptForForceTarget() {
+   Serial.print("Enter target force in N: ");
+
+   while (Serial.available() == 0) {
+   }
+
+   String input = Serial.readStringUntil('\n');
+   input.trim();
+
+   if (input.length() == 0) {
+      return;
+   }
+
+   float newForce = input.toFloat();
+
+   if (newForce == 0.0 && input != "0" && input != "0.0") {
+      Serial.println("Invalid input. Please enter a number.");
+      return;
+   }
+
+   if (!forceTargetIsValid(newForce)) {
+      Serial.print("Invalid target force. Enter a value between ");
+      Serial.print(MIN_FORCE_TARGET_N);
+      Serial.print(" and ");
+      Serial.print(MAX_FORCE_TARGET_N);
+      Serial.println(" N.");
+      return;
+   }
+
+   targetForce = newForce;
+   forceActive = true;
+   contactDetected = false;
+   inToleranceBand = false;
+   resetForcePID();
+
+   Serial.print("Target force set to: ");
+   Serial.print(targetForce);
+   Serial.println(" N");
+}
+
+// ------------------------------------------------------------
 // Advance to next sequence target
 // ------------------------------------------------------------
 void advanceSequenceTarget() {
@@ -296,6 +410,7 @@ void setup() {
    Serial.println("1 = Continuous Mode");
    Serial.println("2 = Target Position Mode");
    Serial.println("3 = Sequence Mode");
+   Serial.println("4 = Force Control Mode");
    Serial.print("Enter choice: ");
 
    int mode = readIntFromSerial();
@@ -311,6 +426,10 @@ void setup() {
    else if (mode == 3) {
       currentMode = MODE_SEQUENCE;
       Serial.println("Sequence Mode Selected.");
+   }
+   else if (mode == 4) {
+      currentMode = MODE_FORCE;
+      Serial.println("Force Control Mode Selected.");
    }
    else {
       Serial.println("Invalid choice. Defaulting to Continuous Mode.");
@@ -338,6 +457,7 @@ void setup() {
 
    currentDir = forward;
    resetPID();
+   resetForcePID();
 }
 
 // ------------------------------------------------------------
@@ -370,6 +490,7 @@ void loop() {
          motor->setDirection(forward);
       }
 
+      motor->setHalfDelay(2);
       motor->rotate();
 
       float current = currentSensor->readCurrent();
@@ -495,4 +616,136 @@ void loop() {
 
       return;
    }
+
+
+   // --------------------------------------------------------
+   // FORCE CONTROL MODE
+   // --------------------------------------------------------
+   if (currentMode == MODE_FORCE) {
+
+      if (!forceActive) {
+         promptForForceTarget();
+         return;
+      }
+
+      float currentForce = getFilteredForce();
+
+      // Stage 1: approach until contact is detected
+      if (!contactDetected) {
+         if (currentForce >= CONTACT_FORCE_THRESHOLD_N) {
+            contactDetected = true;
+            inToleranceBand = false;
+            resetForcePID();
+            Serial.println("Contact detected. Starting force regulation.");
+            return;
+         }
+
+         motor->setHalfDelay(6);
+
+         Direction newDir = reverse; // approach direction
+         if (newDir != currentDir) {
+            motor->setDirection(newDir);
+            currentDir = newDir;
+         }
+
+         motor->step();
+
+         static unsigned long lastApproachPrintTime = 0;
+         unsigned long nowApproachPrint = millis();
+
+         if (nowApproachPrint - lastApproachPrintTime >= 100) {
+            Serial.print("Approaching... Force: ");
+            Serial.print(currentForce);
+            Serial.print(" N | Target: ");
+            Serial.print(targetForce);
+            Serial.println(" N");
+
+            lastApproachPrintTime = nowApproachPrint;
+         }
+
+         return;
+      }
+
+      // Stage 2: closed-loop force regulation
+      float forceError = targetForce - currentForce;
+
+      if (abs(forceError) <= FORCE_TOLERANCE_N) {
+         if (!inToleranceBand) {
+            inToleranceBand = true;
+            toleranceStartTime = millis();
+         }
+
+         if (millis() - toleranceStartTime >= SETTLE_TIME_MS) {
+            motor->setHalfDelay(6);
+
+            Serial.print("Force reached at: ");
+            Serial.print(currentForce);
+            Serial.print(" N (Target: ");
+            Serial.print(targetForce);
+            Serial.println(" N)");
+            Serial.println();
+
+            forceActive = false;
+            contactDetected = false;
+            inToleranceBand = false;
+            return;
+         }
+      }
+      else {
+         inToleranceBand = false;
+      }
+
+      unsigned long now = millis();
+      float dt = (now - forceLastTime) / 1000.0;
+
+      if (dt <= 0.0) {
+         dt = 0.001;
+      }
+
+      forceLastTime = now;
+
+      forceIntegral += forceError * dt;
+      forceIntegral = constrain(forceIntegral, -FORCE_INTEGRAL_LIMIT, FORCE_INTEGRAL_LIMIT);
+
+      float forceDerivative = (forceError - forcePrevError) / dt;
+      forcePrevError = forceError;
+
+      float forceOutput = (KpForce * forceError) + (KiForce * forceIntegral) + (KdForce * forceDerivative);
+      float absForceOutput = abs(forceOutput);
+
+      if (absForceOutput < FORCE_MIN_OUTPUT) {
+         return;
+      }
+
+      int halfDelay = forceOutputToHalfDelay(absForceOutput);
+      motor->setHalfDelay(halfDelay);
+
+      // If more force is needed, move deeper into contact.
+      // If force is too high, back off.
+      Direction newDir = (forceOutput >= 0) ? reverse : forward;
+
+      if (newDir != currentDir) {
+         motor->setDirection(newDir);
+         currentDir = newDir;
+      }
+
+      motor->step();
+
+      static unsigned long lastPrintTimeForce = 0;
+      unsigned long nowPrintForce = millis();
+
+      if (nowPrintForce - lastPrintTimeForce >= 100) {
+         Serial.print("Force: ");
+         Serial.print(currentForce);
+         Serial.print(" N | Target: ");
+         Serial.print(targetForce);
+         Serial.print(" N | Error: ");
+         Serial.println(forceError);
+
+         lastPrintTimeForce = nowPrintForce;
+      }
+
+      return;
+   }
+
 }

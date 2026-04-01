@@ -34,9 +34,17 @@ float CurrentSensor::readCurrent() {
     return current;
 }
 
-int FlexSensor::readValue() {
+float FlexSensor::readRaw() {
     // Output raw value from ADC (0-1023)
     return analogRead(m_outputPin);
+}
+
+float FlexSensor::readForce() {
+    float raw = analogRead(m_outputPin);
+
+    // map 0-1023 ADC to 0-10 N
+    float force = (raw/1023.0)*10.0;
+    return force;
 }
 
 float IRDistanceSensor::readDistance() {
