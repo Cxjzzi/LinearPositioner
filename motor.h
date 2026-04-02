@@ -17,6 +17,7 @@ public:
     void setHalfDelay(int halfDelay);
     void setDirection(Direction dir);
     void rotate();
+    void step();
 
 private:
     int m_pinMS1;

@@ -85,3 +85,11 @@ void Motor::rotate() {
         delay(m_halfDelay);
     }
 }
+
+
+void Motor::step() {
+    digitalWrite(m_pinSTEP, HIGH);
+    delay(m_halfDelay);
+    digitalWrite(m_pinSTEP, LOW);
+    delay(m_halfDelay);
+}
