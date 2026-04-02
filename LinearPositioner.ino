@@ -26,7 +26,7 @@ float targetForce = 2.0;
 // ------------------------------------------------------------
 float Kp = 20.0;
 float Ki = 0.00;
-float Kd = 0.03;
+float Kd = 0.00;
 
 // ------------------------------------------------------------
 // Force-control PID Gains
@@ -90,7 +90,7 @@ const float MAX_TARGET_CM = 35.0;
 const float MIN_FORCE_TARGET_N = 0.2;
 const float MAX_FORCE_TARGET_N = 8.0;
 const float FORCE_TOLERANCE_N = 0.10;
-const float CONTACT_FORCE_THRESHOLD_N = 0.20;
+const float CONTACT_FORCE_THRESHOLD_N = 0.40;
 const float FORCE_MIN_OUTPUT = 0.5;
 const float FORCE_MAX_OUTPUT = 35.0;
 const float FORCE_INTEGRAL_LIMIT = 10.0;
@@ -363,7 +363,6 @@ void promptForForceTarget() {
    targetForce = newForce;
    forceActive = true;
    contactDetected = false;
-   inToleranceBand = false;
    resetForcePID();
 
    Serial.print("Target force set to: ");
@@ -535,7 +534,7 @@ void loop() {
 
          if (millis() - toleranceStartTime >= SETTLE_TIME_MS) {
             inToleranceBand = false;
-            motor->setHalfDelay(5);
+            motor->setHalfDelay(3);
 
             Serial.print("Target reached at: ");
             Serial.print(currentDistance);
@@ -634,7 +633,6 @@ void loop() {
       if (!contactDetected) {
          if (currentForce >= CONTACT_FORCE_THRESHOLD_N) {
             contactDetected = true;
-            inToleranceBand = false;
             resetForcePID();
             Serial.println("Contact detected. Starting force regulation.");
             return;
@@ -670,26 +668,19 @@ void loop() {
       float forceError = targetForce - currentForce;
 
       if (abs(forceError) <= FORCE_TOLERANCE_N) {
-         if (!inToleranceBand) {
-            inToleranceBand = true;
-            toleranceStartTime = millis();
-         }
+         motor->setHalfDelay(6);
 
-         if (millis() - toleranceStartTime >= SETTLE_TIME_MS) {
-            motor->setHalfDelay(6);
+         Serial.print("Force reached at: ");
+         Serial.print(currentForce);
+         Serial.print(" N (Target: ");
+         Serial.print(targetForce);
+         Serial.println(" N)");
+         Serial.println();
 
-            Serial.print("Force reached at: ");
-            Serial.print(currentForce);
-            Serial.print(" N (Target: ");
-            Serial.print(targetForce);
-            Serial.println(" N)");
-            Serial.println();
-
-            forceActive = false;
-            contactDetected = false;
-            inToleranceBand = false;
-            return;
-         }
+         forceActive = false;
+         contactDetected = false;
+         inToleranceBand = false;
+         return;
       }
       else {
          inToleranceBand = false;
