@@ -1,19 +1,20 @@
 # Linear Positioner System
 
-A multi-mode Arduino-based linear positioning system with closed-loop position and force control, featuring real-time sensor feedback, PID control, and sequence automation.
 ---
+
+A multi-mode Arduino-based linear positioning system with closed-loop position and force control, featuring real-time sensor feedback, PID control, and sequence automation.
 
 ## ✨ Features
 
-🔄 **Continuous Mode** – Automatic back-and-forth motion within bounds
-🎯 **Target Position Mode** – Closed-loop position control using IR sensor
-🔁 **Sequence Mode** – Execute multiple target positions with dwell time
-💪 **Force Control Mode** – Closed-loop force regulation using FSR
-⚡️ **Current Sensor Monitoring**  - Reads motor load (printed to Serial in continuous mode)
-📉 **EMA Filtering** – Smooth sensor readings for stable control
-⚙️ **PID-Based Control** – Adjustable gains for precise movement
-⏱️ **Dwell Time Control** – Pause at targets during sequence execution
-🟢🔴 **Safety System** – Light sensor + emergency stop button
+- 🔄 **Continuous Mode** – Automatic back-and-forth motion within bounds
+- 🎯 **Target Position Mode** – Closed-loop position control using IR sensor
+- 🔁 **Sequence Mode** – Execute multiple target positions with dwell time
+- 💪 **Force Control Mode** – Closed-loop force regulation using FSR
+- ⚡️ **Current Sensor Monitoring**  - Reads motor load (printed to Serial in continuous mode)
+- 📉 **EMA Filtering** – Smooth sensor readings for stable control
+- ⚙️ **PID-Based Control** – Adjustable gains for precise movement
+- ⏱️ **Dwell Time Control** – Pause at targets during sequence execution
+- 🟢🔴 **Safety System** – Light sensor + emergency stop button
 
 ### 🔹 Visual Indicators
 - **Green LED:** System running normally  
@@ -118,7 +119,7 @@ This reduces noise while maintaining responsiveness.
 - Hybrid position + force control
 
 ---
-## 🧩 Flow Chart
+## 📊  Flow Chart
                                                                   ┌──────────────────────┐
                                                                   │      START SYSTEM    │
                                                                   └───────────┬──────────┘
